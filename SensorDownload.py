@@ -25,7 +25,8 @@ sha256_value = response['body']['resources'][0]['sha256']
 #debugging: print("sha265 = ", sha256_value)
 
 downloads = falcon.download_sensor_installer(id= sha256_value,
-                                            download_path="/tmp/",
+                                            #download_path="/tmp/",
+                                             download_path=os.path.join(os.path.expanduser('~'), 'Downloads')
                                             file_name="cs_installer.exe"
                                             )
 print(downloads)
