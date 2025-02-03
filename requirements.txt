@@ -1,2 +1,2 @@
-python-dotenv==1.0.0
-crowdstrike-falconpy==1.4.0
+python-dotenv
+crowdstrike-falconpy
