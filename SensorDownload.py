@@ -19,3 +19,13 @@ response = falcon.get_combined_sensor_installers_by_query(offset=0,
                                                           filter="platform:'windows'"
                                                           )
 print(response)
+
+#sha256_value = response.get('sha256')
+sha256_value = response['body']['resources'][0]['sha256']
+#debugging: print("sha265 = ", sha256_value)
+
+downloads = falcon.download_sensor_installer(id= sha256_value,
+                                            download_path="/tmp/",
+                                            file_name="cs_installer.exe"
+                                            )
+print(downloads)
