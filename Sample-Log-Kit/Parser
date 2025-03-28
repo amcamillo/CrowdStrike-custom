@@ -1,148 +1,125 @@
-# Parser Name: ThinkinfosecAttackSimParser
-# Description: Parses JSON logs from the Python Attack Simulator (sourcetype=cs:test:attacksim:chain)
-#              and maps fields to CrowdStrike Common Schema (CPS).
+# Parser Name: ThinkinfosecAttackSimParser_v2
+# Description: Parses JSON logs from Python Attack Simulator (sourcetype=cs:test:attacksim:chain)
 
 # Match events with the specific sourcetype tag/field
 @sourcetype := "cs:test:attacksim:chain"
 
-# --- Handle different HEC input formats ---
-# The script sends data differently depending on the target HEC URL.
-# Check if 'attributes' field exists (sent to /api/v1/humio-structured)
-# Otherwise, assume 'event' field exists (sent to /services/collector/event)
-case {
-  attributes != null | attributes? := attributes; # Assign 'attributes' content to 'attributes?' variable
-  event != null      | attributes? := event;      # Assign 'event' content to 'attributes?' variable
-  *                  | attributes? := ""; drop()  # If neither exists, assign empty and drop the event
-}
+# Safely parse both potential payload structures into temporary fields.
+# parseJson with default="" prevents errors if 'attributes' or 'event' fields are missing.
+temp_attrs := parseJson(attributes, default="")
+temp_event := parseJson(event, default="")
 
-# Parse the main JSON payload (which is now in the 'attributes?' variable)
-| parseJson(attributes?)
+# --- Core Field Mapping ---
+# Use coalesce, preferring the humio-structured 'temp_attrs' payload first,
+# then the standard 'temp_event' payload, and finally any existing @field.
 
-# --- Core Field Mapping (using coalesce to handle potential missing fields) ---
-# Use coalesce(extractedField, @existingField) to prefer the newly parsed field
-# but keep the existing one (like @timestamp) if parsing fails or field is missing.
+@timestamp := coalesce(temp_attrs."@timestamp", temp_event."@timestamp", @timestamp)
 
-# Timestamp
-@timestamp := coalesce(timestamp, @timestamp)
+event.category   := coalesce(temp_attrs.event.category,   temp_event.category,   event.category)
+event.type       := coalesce(temp_attrs.event.type,       temp_event.type,       event.type)
+event.outcome    := coalesce(temp_attrs.event.outcome,    temp_event.outcome,    event.outcome)
+event.action     := coalesce(temp_attrs.event.action,     temp_event.action,     event.action)
+event.provider   := coalesce(temp_attrs.event.provider,   temp_event.provider,   event.provider)
+event.kind       := coalesce(temp_attrs.event.kind,       temp_event.kind,       event.kind)
+event.created    := coalesce(temp_attrs.event.created,    temp_event.created,    event.created)
+event.module     := coalesce(temp_attrs.event.module,     temp_event.module,     event.module)
+event.timezone   := coalesce(temp_attrs.event.timezone,   temp_event.timezone,   event.timezone)
+log.level        := coalesce(temp_attrs.log.level,        temp_event.log.level,  log.level)
 
-# Event details
-event.category   := category ?? event.category   # Use existing LogScale field if parser extracts 'category'
-event.type       := type ?? event.type
-event.outcome    := outcome ?? event.outcome
-event.action     := action ?? event.action
-event.provider   := provider ?? event.provider
-event.kind       := kind ?? event.kind
-event.created    := created ?? event.created
-event.module     := module ?? event.module
-event.timezone   := timezone ?? event.timezone
-log.level        := log.level ?? loglevel # Map log.level if present
+host.name        := coalesce(temp_attrs.host.name,        temp_event.host.name,        temp_attrs.name, temp_event.name, host)
+host.hostname    := coalesce(temp_attrs.host.hostname,    temp_event.host.hostname,    host.hostname)
+host.ip          := coalesce(temp_attrs.host.ip,          temp_event.host.ip,          host.ip)
+host.mac         := coalesce(temp_attrs.host.mac,         temp_event.host.mac,         host.mac)
+host.os.name     := coalesce(temp_attrs.host.os.name,     temp_event.host.os.name,     host.os.name)
+host.os.family   := coalesce(temp_attrs.host.os.family,   temp_event.host.os.family,   host.os.family)
+host.os.platform := coalesce(temp_attrs.host.os.platform, temp_event.host.os.platform, host.os.platform)
+host.os.version  := coalesce(temp_attrs.host.os.version,  temp_event.host.os.version,  host.os.version)
+host.id          := coalesce(temp_attrs.host.id,          temp_event.host.id,          host.id)
 
-# Host details
-host.name        := coalesce(host.name, name, host) # Try 'host.name', then 'name', then original 'host' field
-host.hostname    := hostname ?? host.hostname
-host.ip          := ip ?? host.ip             # Map 'ip' array/string from host object
-host.mac         := mac ?? host.mac           # Map 'mac' array/string from host object
-host.os.name     := os.name ?? host.os.name
-host.os.family   := os.family ?? host.os.family # Will set 'event_platform' derived field in Falcon
-host.os.version  := os.version ?? host.os.version
-host.id          := host.id ?? host_guid      # Map host.id if present
+user.name        := coalesce(temp_attrs.user.name,        temp_event.user.name,        temp_attrs.username, temp_event.username, user.name)
+user.domain      := coalesce(temp_attrs.user.domain,      temp_event.user.domain,      user.domain)
+user.id          := coalesce(temp_attrs.user.id,          temp_event.user.id,          temp_attrs.uid, temp_event.uid, user.id)
+user.group.id    := coalesce(temp_attrs.user.group.id,    temp_event.user.group.id,    temp_attrs.gid, temp_event.gid, user.group.id)
+user.group.name  := coalesce(temp_attrs.user.group.name,  temp_event.user.group.name,  user.group.name)
 
-# User details
-user.name        := coalesce(user.name, username) # Map user.name or username
-user.domain      := domain ?? user.domain
-user.id          := coalesce(user.id, uid)    # Map user.id or uid (from Linux process)
-user.group.id    := coalesce(user.group.id, gid) # Map user.group.id or gid (from Linux process)
+process.pid                 := coalesce(temp_attrs.process.pid,                 temp_event.process.pid,                 temp_attrs.pid, temp_event.pid, process.pid) | cast(type=integer)
+process.name                := coalesce(temp_attrs.process.name,                temp_event.process.name,                temp_attrs.proc_name, temp_event.proc_name, process.name)
+process.executable          := coalesce(temp_attrs.process.executable,          temp_event.process.executable,          process.executable)
+process.executable_name     := coalesce(temp_attrs.process.executable_name,     temp_event.process.executable_name,     process.executable_name)
+process.command_line        := coalesce(temp_attrs.process.command_line,        temp_event.process.command_line,        process.command_line)
+process.parent.pid          := coalesce(temp_attrs.process.parent.pid,          temp_event.process.parent.pid,          temp_attrs.parent_pid, temp_event.parent_pid, process.parent.pid) | cast(type=integer)
+process.parent.name         := coalesce(temp_attrs.process.parent.name,         temp_event.process.parent.name,         temp_attrs.parent_proc_name, temp_event.parent_proc_name, process.parent.name)
+process.parent.executable   := coalesce(temp_attrs.process.parent.executable,   temp_event.process.parent.executable,   process.parent.executable)
+process.parent.executable_name := coalesce(temp_attrs.process.parent.executable_name, temp_event.process.parent.executable_name, process.parent.executable_name)
+process.entity_id           := coalesce(temp_attrs.process.entity_id,           temp_event.process.entity_id,           process.entity_id)
+process.parent.entity_id    := coalesce(temp_attrs.process.parent.entity_id,    temp_event.process.parent.entity_id,    process.parent.entity_id)
+process.uid                 := coalesce(temp_attrs.process.uid,                 temp_event.process.uid,                 temp_attrs.uid, temp_event.uid, process.uid) | cast(type=integer)
+process.gid                 := coalesce(temp_attrs.process.gid,                 temp_event.process.gid,                 temp_attrs.gid, temp_event.gid, process.gid) | cast(type=integer)
+process.hash.md5            := coalesce(temp_attrs.process.hash.md5,            temp_event.process.hash.md5,            process.hash.md5)
+process.hash.sha1           := coalesce(temp_attrs.process.hash.sha1,           temp_event.process.hash.sha1,           process.hash.sha1)
+process.hash.sha256         := coalesce(temp_attrs.process.hash.sha256,         temp_event.process.hash.sha256,         process.hash.sha256)
 
-# Process details
-process.pid                 := pid ?? process.pid
-process.name                := process.name ?? proc_name # Map process.name or proc_name
-process.executable          := executable ?? process.executable
-process.executable_name     := executable_name ?? process.executable_name # Map pre-calculated basename
-process.command_line        := command_line ?? process.command_line
-process.parent.pid          := parent.pid ?? parent_pid ?? process.parent.pid
-process.parent.name         := parent.name ?? parent_proc_name ?? process.parent.name
-process.parent.executable   := parent.executable ?? process.parent.executable
-process.parent.executable_name := parent.executable_name ?? process.parent.executable_name # Map pre-calculated basename
-process.entity_id           := entity_id ?? process.entity_id
-process.parent.entity_id    := parent.entity_id ?? process.parent.entity_id
-# Linux specific process fields
-process.uid                 := uid ?? process.uid
-process.gid                 := gid ?? process.gid
-# Hashes
-process.hash.md5            := hash.md5 ?? process.hash.md5
-process.hash.sha1           := hash.sha1 ?? process.hash.sha1
-process.hash.sha256         := hash.sha256 ?? process.hash.sha256
+source.ip        := coalesce(temp_attrs.source.ip,        temp_event.source.ip,        temp_attrs.src_ip, temp_event.src_ip, temp_attrs.LocalIP, temp_event.LocalIP, temp_attrs.LocalAddressIP4, temp_event.LocalAddressIP4, source.ip)
+source.port      := coalesce(temp_attrs.source.port,      temp_event.source.port,      temp_attrs.src_port, temp_event.src_port, temp_attrs.LocalPort, temp_event.LocalPort, temp_attrs.LPort, temp_event.LPort, source.port) | cast(type=integer)
+source.bytes     := coalesce(temp_attrs.source.bytes,     temp_event.source.bytes,     temp_attrs.bytes_out, temp_event.bytes_out, source.bytes) | cast(type=integer)
+destination.ip   := coalesce(temp_attrs.destination.ip,   temp_event.destination.ip,   temp_attrs.dest_ip, temp_event.dest_ip, temp_attrs.RemoteIP, temp_event.RemoteIP, temp_attrs.RemoteAddressIP4, temp_event.RemoteAddressIP4, destination.ip)
+destination.port := coalesce(temp_attrs.destination.port, temp_event.destination.port, temp_attrs.dest_port, temp_event.dest_port, temp_attrs.RPort, temp_event.RPort, destination.port) | cast(type=integer)
+destination.bytes:= coalesce(temp_attrs.destination.bytes,temp_event.destination.bytes,temp_attrs.bytes_in, temp_event.bytes_in, destination.bytes) | cast(type=integer)
+destination.domain:=coalesce(temp_attrs.destination.domain,temp_event.destination.domain,temp_attrs.dest_domain, temp_event.dest_domain, destination.domain)
+network.transport     := coalesce(temp_attrs.network.transport,     temp_event.network.transport,     temp_attrs.transport, temp_event.transport, network.transport)
+network.protocol      := coalesce(temp_attrs.network.protocol,      temp_event.network.protocol,      temp_attrs.protocol_name, temp_event.protocol_name, network.protocol)
+network.iana_number   := coalesce(temp_attrs.network.iana_number,   temp_event.network.iana_number,   temp_attrs.protocol, temp_event.protocol, temp_attrs.iana_number, temp_event.iana_number, network.iana_number) | cast(type=integer)
+network.direction     := coalesce(temp_attrs.network.direction,     temp_event.network.direction,     temp_attrs.direction, temp_event.direction, network.direction)
+network.community_id  := coalesce(temp_attrs.network.community_id,  temp_event.network.community_id,  temp_attrs.community_id, temp_event.community_id, network.community_id)
+network.bytes         := coalesce(temp_attrs.network.bytes,         temp_event.network.bytes,         temp_attrs.total_bytes, temp_event.total_bytes, network.bytes) | cast(type=integer)
 
-# Network details (map source/destination)
-source.ip        := source.ip ?? src_ip ?? LocalIP ?? LocalAddressIP4 # Map various possibilities for source IP
-source.port      := source.port ?? src_port ?? LocalPort ?? LPort
-source.bytes     := source.bytes ?? bytes_out
-destination.ip   := destination.ip ?? dest_ip ?? RemoteIP ?? RemoteAddressIP4 # Map various possibilities for dest IP
-destination.port := destination.port ?? dest_port ?? RPort
-destination.bytes:= destination.bytes ?? bytes_in
-destination.domain:= destination.domain ?? dest_domain
-network.transport     := network.transport ?? transport
-network.protocol      := network.protocol ?? protocol_name # Field like 'http', 'smb'
-network.iana_number   := network.iana_number ?? protocol ?? iana_number # Field like 6, 17
-network.direction     := network.direction ?? direction
-network.community_id  := network.community_id ?? community_id
-network.bytes         := network.bytes ?? total_bytes
+url.original    := coalesce(temp_attrs.url.original,    temp_event.url.original,    temp_attrs.original_url, temp_event.original_url, url.original)
+url.path        := coalesce(temp_attrs.url.path,        temp_event.url.path,        temp_attrs.path, temp_event.path, url.path)
+url.domain      := coalesce(temp_attrs.url.domain,      temp_event.url.domain,      temp_attrs.http_domain, temp_event.http_domain, url.domain)
+url.query       := coalesce(temp_attrs.url.query,       temp_event.url.query,       temp_attrs.query, temp_event.query, url.query)
 
-# URL details
-url.original    := url.original ?? original_url
-url.path        := url.path ?? path
-url.domain      := url.domain ?? http_domain
-url.query       := url.query ?? query
+http.request.method  := coalesce(temp_attrs.http.request.method,  temp_event.http.request.method,  temp_attrs.request_method, temp_event.request_method, http.request.method)
+http.response.status_code := coalesce(temp_attrs.http.response.status_code, temp_event.http.response.status_code, temp_attrs.status_code, temp_event.status_code, http.response.status_code) | cast(type=integer)
 
-# HTTP details
-http.request.method  := http.request.method ?? request_method
-http.response.status_code := http.response.status_code ?? status_code
+file.path        := coalesce(temp_attrs.file.path,        temp_event.file.path,        temp_attrs.filepath, temp_event.filepath, file.path)
+file.name        := coalesce(temp_attrs.file.name,        temp_event.file.name,        temp_attrs.filename, temp_event.filename, file.name)
+file.directory   := coalesce(temp_attrs.file.directory,   temp_event.file.directory,   temp_attrs.directory, temp_event.directory, file.directory)
+file.extension   := coalesce(temp_attrs.file.extension,   temp_event.file.extension,   temp_attrs.extension, temp_event.extension, file.extension)
+file.size        := coalesce(temp_attrs.file.size,        temp_event.file.size,        temp_attrs.filesize, temp_event.filesize, file.size) | cast(type=integer)
+file.hash.md5    := coalesce(temp_attrs.file.hash.md5,    temp_event.file.hash.md5,    temp_attrs.file_md5, temp_event.file_md5, file.hash.md5)
+file.hash.sha1   := coalesce(temp_attrs.file.hash.sha1,   temp_event.file.hash.sha1,   temp_attrs.file_sha1, temp_event.file_sha1, file.hash.sha1)
+file.hash.sha256 := coalesce(temp_attrs.file.hash.sha256, temp_event.file.hash.sha256, temp_attrs.file_sha256, temp_event.file_sha256, file.hash.sha256)
 
-# File details
-file.path        := file.path ?? filepath
-file.name        := file.name ?? filename
-file.directory   := file.directory ?? directory
-file.extension   := file.extension ?? extension
-file.size        := file.size ?? filesize
-# Hashes (can also be on file object)
-file.hash.md5    := file.hash.md5 ?? file_md5
-file.hash.sha1   := file.hash.sha1 ?? file_sha1
-file.hash.sha256 := file.hash.sha256 ?? file_sha256
+registry.path    := coalesce(temp_attrs.registry.path,    temp_event.registry.path,    temp_attrs.reg_path, temp_event.reg_path, registry.path)
+registry.hive    := coalesce(temp_attrs.registry.hive,    temp_event.registry.hive,    temp_attrs.hive, temp_event.hive, registry.hive)
+registry.key     := coalesce(temp_attrs.registry.key,     temp_event.registry.key,     temp_attrs.reg_key, temp_event.reg_key, registry.key)
+registry.value   := coalesce(temp_attrs.registry.value,   temp_event.registry.value,   temp_attrs.reg_value, temp_event.reg_value, registry.value)
 
-# Registry details
-registry.path    := registry.path ?? reg_path
-registry.hive    := registry.hive ?? hive
-registry.key     := registry.key ?? reg_key
-registry.value   := registry.value ?? reg_value
-# registry.data.strings is tricky to map directly, often seen in raw log
+observer.vendor    := coalesce(temp_attrs.observer.vendor,    temp_event.observer.vendor,    temp_attrs.obs_vendor, temp_event.obs_vendor, observer.vendor)
+observer.product   := coalesce(temp_attrs.observer.product,   temp_event.observer.product,   temp_attrs.obs_product, temp_event.obs_product, observer.product)
+observer.type      := coalesce(temp_attrs.observer.type,      temp_event.observer.type,      temp_attrs.obs_type, temp_event.obs_type, observer.type)
+observer.hostname  := coalesce(temp_attrs.observer.hostname,  temp_event.observer.hostname,  temp_attrs.obs_hostname, temp_event.obs_hostname, observer.hostname)
+agent.type         := coalesce(temp_attrs.agent.type,         temp_event.agent.type,         temp_attrs.agent_type, temp_event.agent_type, agent.type)
+agent.version      := coalesce(temp_attrs.agent.version,      temp_event.agent.version,      temp_attrs.agent_version, temp_event.agent_version, agent.version)
 
-# Map Observer/Agent if present
-observer.vendor    := observer.vendor ?? obs_vendor
-observer.product   := observer.product ?? obs_product
-observer.type      := observer.type ?? obs_type
-observer.hostname  := observer.hostname ?? obs_hostname
-agent.type         := agent.type ?? agent_type
-agent.version      := agent.version ?? agent_version
-
-# Add generated ATT&CK tags
-# This assumes the 'tags' field in the JSON is an array of strings
-| arrayextend(field=@tags, array=tags) # Add tags from the event to the LogScale @tags field
+# Add generated ATT&CK tags from either payload structure
+| @tags += coalesce(temp_attrs.tags, temp_event.tags, [])
 
 # --- Field Aliasing/Copying for Native Falcon Fields ---
-# Try to populate fields similar to the blue text if the primary CPS mapping didn't cover them
-LocalIP      := source.ip ?? LocalIP   # Ensure LocalIP exists if source.ip was mapped
-LocalPort    := source.port ?? LocalPort
-RemoteIP     := destination.ip ?? RemoteIP
-RemotePort   := destination.port ?? RemotePort
-Protocol     := network.iana_number ?? Protocol # Ensure Protocol (numeric) exists
-ImageFileName := process.executable ?? ImageFileName # Often expects full path
-
-# Attempt to extract ContextBaseFileName if not provided directly
-# This is heuristic and might not always match Falcon's internal logic
-ContextBaseFileName := process.executable_name ?? basename(process.executable) ?? ContextBaseFileName
+LocalIP      := coalesce(source.ip, LocalIP)
+LocalPort    := coalesce(source.port, LocalPort)
+RemoteIP     := coalesce(destination.ip, RemoteIP)
+RemotePort   := coalesce(destination.port, RemotePort)
+Protocol     := coalesce(network.iana_number, Protocol)
+ImageFileName := coalesce(process.executable, ImageFileName)
+ContextBaseFileName := coalesce(process.executable_name, basename(process.executable), ContextBaseFileName)
+ParentBaseFileName := coalesce(process.parent.executable_name, basename(process.parent.executable), ParentBaseFileName)
+UID := coalesce(process.uid, user.id, UID)
+GID := coalesce(process.gid, user.group.id, GID)
 
 # --- Final Cleanup ---
-# Remove the temporary 'attributes?' field and original complex fields if desired
-| remove([attributes?, event, host, user, process, network, file, registry, url, http, source, destination, observer, agent, log, tags])
+# Remove temporary parse results and original complex fields if desired for cleanliness
+# | remove([temp_attrs, temp_event, attributes, event, host, user, process, network, file, registry, url, http, source, destination, observer, agent, log])
 
-| @vendor := vendor ?? @vendor # Ensure top-level vendor field is set if provided
+# Ensure top-level vendor field from tags or event data is preferred
+| @vendor := coalesce(vendor, @vendor)
