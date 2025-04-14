@@ -53,15 +53,14 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Windows (cmd)
-# python -m venv venv
-# .\venv\Scripts\activate
+python -m venv venv
+.\venv\Scripts\activate
 
 # Windows (PowerShell - may require execution policy change)
-# python -m venv venv
-# .\venv\Scripts\Activate.ps1
-Bash
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 
-Install Dependencies:
+# Install Dependencies:
 Create a requirements.txt file with the following content:
 Flask>=2.0
 requests>=2.25
