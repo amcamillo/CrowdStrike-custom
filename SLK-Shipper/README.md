@@ -43,7 +43,7 @@ SLK Shipper operates as a local web server. The user interacts with the web UI t
 ### Prerequisites:
 Python 3.7+
 Clone the Repository:
-git clone https://github.com/your-username/slk-shipper.git # Replace with your repo URL
+git clone https://github.com/amcamillo/CrowdStrike-custom/slk-shipper.git
 cd slk-shipper
 Bash
 
